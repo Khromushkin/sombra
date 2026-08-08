@@ -1,0 +1,9 @@
+osmnx>=2.0
+fastapi
+uvicorn[standard]
+diskcache
+astral
+httpx
+scipy
+pyrosm  # optional: local PBF provider (SOMBRA_PBF)
+pytest
