@@ -26,9 +26,17 @@ python scripts/fetch_catastro.py --municipality 46900 \
 #    Re-running? The municipality zip is ~33 MB and slow; download it once and pass
 #    --zip A.ES.SDGC.BU.46900.zip to skip steps 1-3.
 
-# 2. PNOA-LiDAR: download 1-2 LAZ tiles covering central Valencia from
-#    https://centrodedescargas.cnig.es (search "LiDAR", zoom to Valencia; the download
-#    centre is interactive -- there is no scriptable direct URL), then:
+# 2. PNOA-LiDAR. Product: Catalogo -> Modelos Digitales de Elevaciones ->
+#    "LIDAR - 3a Cobertura (2022-2025)" (2023 flight over Valencia, 5 points/m2,
+#    1x1 km LAZ tiles, ~43 MB each). Filter by name; Valencia tiles are called
+#      PNOA-2023-VAL-<easting_km>-<northing_km>-H30-NPC02.laz     (UTM 30N / EPSG:25830)
+#    The demo route (Plaza del Ayuntamiento -> Ciudad de las Artes) needs 7 tiles:
+#      725-4371  725-4372  726-4370  726-4371  726-4372  727-4370  727-4371
+#    The download centre is INTERACTIVE only: add to the basket and download from the
+#    browser. There is no scriptable URL -- descargaDir/downloadFile either time out or
+#    return an empty 200. Do not waste time re-deriving this.
+#    Attribution required by the licence (CC-BY 4.0), for a derived product:
+#      "Obra derivada de LiDAR-PNOA-cob3 2022-2025 CC-BY 4.0 scne.es"
 pip install 'laspy[lazrs]' numpy shapely pyproj
 python scripts/lidar_canopy.py PNOA*.laz -o web/data/canopy_valencia.geojson \
     --bbox -0.42 39.44 -0.33 39.50
