@@ -81,30 +81,106 @@ out geom;`;
     return { ways, buildings, trees };
   }
 
-  // ---- Catastro INSPIRE WFS ---------------------------------------------
+  // ---- Catastro INSPIRE -------------------------------------------------
   // Returns building parts: [{ring: [[lon,lat],...], floors}]
+  // Strategy: 1) precomputed local layer (scripts/fetch_catastro.py),
+  //           2) live WFS direct, 3) live WFS via public CORS proxies.
+  let localCatastro; // undefined = not tried, null = absent
+  async function loadLocalCatastro() {
+    if (localCatastro !== undefined) return localCatastro;
+    try {
+      const resp = await fetch(C.LOCAL_CATASTRO, { cache: "force-cache" });
+      const ct = resp.headers.get("content-type") || "";
+      if (!resp.ok || (!ct.includes("json") && !ct.includes("octet"))) throw 0;
+      const d = await resp.json();
+      localCatastro = d && Array.isArray(d.parts) ? d : null;
+    } catch (_) {
+      localCatastro = null;
+    }
+    return localCatastro;
+  }
+
   SRC.fetchCatastro = async function (bbox) {
     const [s, w, n, e] = bbox;
+    report("catastro", "loading");
+    const t0 = performance.now();
+
+    // 1) local precomputed layer
+    const local = await loadLocalCatastro();
+    if (local) {
+      const parts = [];
+      for (const [floors, ring] of local.parts) {
+        if (ring.some(([lon, lat]) => lat >= s && lat <= n && lon >= w && lon <= e)) {
+          parts.push({ floors, ring });
+        }
+      }
+      if (parts.length) {
+        const ms = Math.round(performance.now() - t0);
+        report("catastro", "ok", `${parts.length} partes · capa local (Catastro ATOM) · ${ms} ms`);
+        return parts;
+      }
+    }
+
+    // 2) live WFS: direct, then via CORS proxies
     const url = `${C.CATASTRO_WFS}?service=WFS&version=2.0.0&request=GetFeature` +
       `&typenames=bu:BuildingPart&srsname=urn:ogc:def:crs:EPSG::4326` +
       `&bbox=${s},${w},${n},${e},urn:ogc:def:crs:EPSG::4326&count=4000`;
-    report("catastro", "loading");
-    const t0 = performance.now();
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const text = await resp.text();
-      const parts = parseCatastroGML(text);
-      const ms = Math.round(performance.now() - t0);
-      if (parts.length === 0) throw new Error("0 building parts (¿fuera de cobertura?)");
-      const withFloors = parts.filter((p) => p.floors > 0).length;
-      report("catastro", "ok", `${parts.length} partes de edificio, ${withFloors} con nº de plantas · ${ms} ms`);
-      return parts;
-    } catch (err) {
-      // CORS or service failure -> honest degradation to OSM-only heights
-      report("catastro", "error", String(err).slice(0, 120));
+    const attempts = [{ u: url, via: "directo" }].concat(
+      C.CORS_PROXIES.map((p, i) => ({ u: p(url), via: "proxy CORS " + (i + 1) })));
+    let lastErr = null;
+    for (const a of attempts) {
+      try {
+        const resp = await fetch(a.u);
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const text = await resp.text();
+        const parts = parseCatastroGML(text);
+        if (parts.length === 0) throw new Error("0 building parts (¿fuera de cobertura?)");
+        const withFloors = parts.filter((p) => p.floors > 0).length;
+        const ms = Math.round(performance.now() - t0);
+        report("catastro", "ok", `${parts.length} partes, ${withFloors} con plantas · ${a.via} · ${ms} ms`);
+        return parts;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    // CORS or service failure -> honest degradation to OSM-only heights
+    report("catastro", "error", String(lastErr).slice(0, 120));
+    return [];
+  };
+
+  // ---- PNOA-LiDAR canopy layer (precomputed by scripts/lidar_canopy.py) --
+  let canopyCache;
+  SRC.fetchCanopy = async function (bbox) {
+    if (canopyCache === undefined) {
+      try {
+        const resp = await fetch(C.LOCAL_CANOPY, { cache: "force-cache" });
+        const ct = resp.headers.get("content-type") || "";
+        if (!resp.ok || (!ct.includes("json") && !ct.includes("octet"))) throw 0;
+        const d = await resp.json();
+        canopyCache = d && d.features ? d.features : null;
+      } catch (_) {
+        canopyCache = null;
+      }
+    }
+    if (!canopyCache) {
+      report("lidar", "roadmap");
       return [];
     }
+    const [s, w, n, e] = bbox;
+    const crowns = [];
+    for (const f of canopyCache) {
+      if (!f.geometry) continue;
+      const rings = f.geometry.type === "Polygon" ? [f.geometry.coordinates[0]]
+        : f.geometry.type === "MultiPolygon" ? f.geometry.coordinates.map((p) => p[0]) : [];
+      for (const ring of rings) {
+        if (ring.some(([lon, lat]) => lat >= s && lat <= n && lon >= w && lon <= e)) {
+          crowns.push({ ring, h: (f.properties && f.properties.height) || C.TREE_H });
+        }
+      }
+    }
+    report("lidar", crowns.length ? "ok" : "roadmap",
+      crowns.length ? `${crowns.length} copas de árboles · PNOA-LiDAR (capa precalculada)` : undefined);
+    return crowns;
   };
 
   function parseCatastroGML(text) {

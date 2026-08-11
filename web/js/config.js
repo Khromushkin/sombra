@@ -8,6 +8,14 @@ SOMBRA.config = {
   PHOTON_URL: "https://photon.komoot.io/api",
   // Spanish Cadastre INSPIRE Buildings WFS (BuildingPart carries floor counts)
   CATASTRO_WFS: "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx",
+  // The Catastro WFS sends no CORS headers, so a browser-only app needs a relay.
+  // Order: precomputed local layer -> direct WFS -> public CORS proxies.
+  CORS_PROXIES: [
+    (u) => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+    (u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+  ],
+  LOCAL_CATASTRO: "data/catastro_valencia.json",
+  LOCAL_CANOPY: "data/canopy_valencia.geojson",
   BASEMAP_STYLE: "https://tiles.openfreemap.org/styles/liberty",
 
   DEFAULT_CENTER: [-0.3763, 39.4699], // Valencia

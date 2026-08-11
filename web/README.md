@@ -10,8 +10,29 @@ Live sources (visible in the in-app "Fuentes de datos" panel):
   Spanish buildings. If the service or CORS fails, the app degrades to OSM heights and says so.
 * **Photon** — geocoding.
 * **SunCalc** — solar position (pure astronomy, in-browser).
-* **PNOA-LiDAR** — tree canopies: precomputed layer, pipeline in `../scripts/lidar_canopy.py`
-  (marked "next phase" in the panel).
+* **PNOA-LiDAR** — tree canopies: precomputed local layer (`data/canopy_valencia.geojson`),
+  pipeline in `../scripts/lidar_canopy.py`. Until the file exists the panel shows "next phase".
+
+## Activating ALL sources (POC fact-check)
+
+Two one-off commands on any machine with open internet, then commit + push:
+
+```bash
+# 1. Catastro: real floor counts for Valencia -> local layer (turns the source green)
+pip install requests pyproj
+python scripts/fetch_catastro.py --municipality 46900 \
+    --bbox -0.42 39.44 -0.33 39.50 -o web/data/catastro_valencia.json
+
+# 2. PNOA-LiDAR: download 1-2 LAZ tiles covering central Valencia from
+#    https://centrodedescargas.cnig.es (search "LiDAR", zoom to Valencia), then:
+pip install 'laspy[lazrs]' numpy shapely pyproj
+python scripts/lidar_canopy.py PNOA*.laz -o web/data/canopy_valencia.geojson
+
+git add web/data && git commit -m "data: Catastro + LiDAR local layers (Valencia)" && git push
+```
+
+The Catastro source also tries the live WFS on every request (direct, then via public
+CORS proxies) for areas outside the precomputed layer.
 
 ## Run locally
 

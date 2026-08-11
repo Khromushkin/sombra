@@ -150,12 +150,13 @@
     try {
       const bbox = corridorBBox(o, d);
       const bboxKey = bbox.map((v) => v.toFixed(3)).join(",");
-      let data, catastro;
+      let data, catastro, canopy;
       if (state.lastFetch && state.lastFetch.bboxKey === bboxKey) {
-        ({ data, catastro } = state.lastFetch);
+        ({ data, catastro, canopy } = state.lastFetch);
       } else {
-        [data, catastro] = await Promise.all([SRC.fetchCorridor(bbox), SRC.fetchCatastro(bbox)]);
-        state.lastFetch = { bboxKey, data, catastro };
+        [data, catastro, canopy] = await Promise.all([
+          SRC.fetchCorridor(bbox), SRC.fetchCatastro(bbox), SRC.fetchCanopy(bbox)]);
+        state.lastFetch = { bboxKey, data, catastro, canopy };
       }
 
       const proj = G.makeProjection((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2);
@@ -172,6 +173,9 @@
       }
       for (const b of data.buildings) {
         casters.push({ ring: b.ring.map((c) => proj.toXY(c[0], c[1])), h: S.parseHeight(b.tags) });
+      }
+      for (const crown of (canopy || [])) {
+        casters.push({ ring: crown.ring.map((c) => proj.toXY(c[0], c[1])), h: crown.h });
       }
       for (const tr of data.trees) {
         if (tr.type === "point") {
@@ -357,6 +361,12 @@
   if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
+
+  // Warm up the sources panel on load: ping Photon so its status is live
+  // before the first search, without waiting for user input.
+  setTimeout(() => {
+    if (SOMBRA.sourceStatus.photon.state === "idle") SRC.geocode("Valencia");
+  }, 1500);
 
   // Expose for testing
   window.SOMBRA.app = { state, compute, setOrigin, setDest, map };
