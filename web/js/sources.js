@@ -211,7 +211,9 @@ out geom;`;
 
   // ---- Photon geocoding --------------------------------------------------
   SRC.geocode = async function (q, near) {
-    const p = new URLSearchParams({ q, limit: "5", lang: "es" });
+    // Photon only accepts lang = default|de|en|fr; "es" is rejected with HTTP 400.
+    // "default" returns each place's local name, which in Spain is what we want.
+    const p = new URLSearchParams({ q, limit: "5", lang: "default" });
     if (near) { p.set("lat", near[1]); p.set("lon", near[0]); }
     const t0 = performance.now();
     try {
