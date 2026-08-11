@@ -35,17 +35,21 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("laz", nargs="+", help="PNOA LAZ/LAS tiles")
     ap.add_argument("-o", "--out", default="canopy.geojson")
+    ap.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"),
+                    help="clip output to this lon/lat bbox; keeps the layer small")
     args = ap.parse_args()
 
     try:
         import laspy
         from pyproj import Transformer
-        from shapely.geometry import box, mapping
+        from shapely.geometry import box, mapping, Point
         from shapely.ops import unary_union
+        from shapely.strtree import STRtree
     except ImportError as e:
         print(f"Missing dependency: {e}. pip install 'laspy[lazrs]' numpy shapely pyproj", file=sys.stderr)
         return 1
 
+    clip = box(*args.bbox) if args.bbox else None  # lon/lat, applied after reprojection
     crowns = []
     for path in args.laz:
         las = laspy.read(path)
@@ -76,6 +80,9 @@ def main() -> int:
 
         cells = np.argwhere(canopy >= MIN_TREE_H)
         print(f"{path}: {len(cells)} canopy cells")
+        if not len(cells):
+            continue
+        cell_h = canopy[cells[:, 0], cells[:, 1]]
         # LiDAR PNOA is delivered in UTM (EPSG:258xx); read CRS from the header
         epsg = None
         try:
@@ -88,14 +95,19 @@ def main() -> int:
 
         polys = [box(x0 + cx * CELL, y0 + cy * CELL, x0 + (cx + 1) * CELL, y0 + (cy + 1) * CELL)
                  for cx, cy in cells]
-        if not polys:
-            continue
+        centers = [Point(x0 + (cx + 0.5) * CELL, y0 + (cy + 0.5) * CELL) for cx, cy in cells]
+        tree = STRtree(centers)
+
         dissolved = unary_union(polys).simplify(0.5)
         geoms = dissolved.geoms if hasattr(dissolved, "geoms") else [dissolved]
+        from shapely.ops import transform as shp_transform
         for g in geoms:
-            h = float(np.nanmax(np.where(canopy >= MIN_TREE_H, canopy, np.nan)))
-            from shapely.ops import transform as shp_transform
+            # Height of THIS crown = tallest cell inside it, not the tile maximum.
+            inside = [i for i in tree.query(g) if g.intersects(centers[i])]
+            h = float(cell_h[inside].max()) if inside else MIN_TREE_H
             g84 = shp_transform(tr.transform, g)
+            if clip and not clip.intersects(g84):
+                continue
             crowns.append({"type": "Feature", "properties": {"height": round(h, 1)},
                            "geometry": mapping(g84)})
 

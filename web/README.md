@@ -22,14 +22,28 @@ Two one-off commands on any machine with open internet, then commit + push:
 pip install requests pyproj
 python scripts/fetch_catastro.py --municipality 46900 \
     --bbox -0.42 39.44 -0.33 39.50 -o web/data/catastro_valencia.json
+#    -> 178 529 building parts, 21 MB (4.3 MB over the wire, Pages gzips).
+#    Re-running? The municipality zip is ~33 MB and slow; download it once and pass
+#    --zip A.ES.SDGC.BU.46900.zip to skip steps 1-3.
 
 # 2. PNOA-LiDAR: download 1-2 LAZ tiles covering central Valencia from
-#    https://centrodedescargas.cnig.es (search "LiDAR", zoom to Valencia), then:
+#    https://centrodedescargas.cnig.es (search "LiDAR", zoom to Valencia; the download
+#    centre is interactive -- there is no scriptable direct URL), then:
 pip install 'laspy[lazrs]' numpy shapely pyproj
-python scripts/lidar_canopy.py PNOA*.laz -o web/data/canopy_valencia.geojson
+python scripts/lidar_canopy.py PNOA*.laz -o web/data/canopy_valencia.geojson \
+    --bbox -0.42 39.44 -0.33 39.50
 
 git add web/data && git commit -m "data: Catastro + LiDAR local layers (Valencia)" && git push
 ```
+
+The baked Catastro layer stores each part's **convex hull** rather than its raw ring: the shade
+engine builds every shadow as `convexHull(footprint ∪ translated footprint)`, so the hull yields
+identical shadows at half the vertices (41 MB → 21 MB). Coordinates keep 6 decimals (~0.11 m),
+matching Catastro's own stated geometry accuracy — don't round further, parts are small
+(median ~19 m²) and 1 m quantisation would visibly distort their shadows.
+
+Regenerating a data layer that is already deployed? Bump `CACHE` in `sw.js` too — the service
+worker is cache-first for everything same-origin, `data/` included.
 
 The Catastro source also tries the live WFS on every request (direct, then via public
 CORS proxies) for areas outside the precomputed layer.

@@ -24,6 +24,7 @@ import io
 import json
 import re
 import sys
+import time
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -33,7 +34,61 @@ MASTER_ATOM = "https://www.catastro.hacienda.gob.es/INSPIRE/buildings/ES.SDGC.BU
 def find_links(atom_xml: str) -> list[str]:
     hrefs = re.findall(r'href="([^"]+)"', atom_xml)
     hrefs += re.findall(r"<id>([^<]+)</id>", atom_xml)
-    return hrefs
+    # The feeds advertise http:// links, but Catastro's port 80 accepts the
+    # connection and then never answers -> ReadTimeout. Always use https.
+    return [h.replace("http://", "https://") for h in hrefs]
+
+
+# 6 decimals ~= 0.11 m, matching Catastro's own horizontalGeometryEstimatedAccuracy
+# (0.1 m). Do not lower this: BuildingParts are small fragments (median ~19 m2,
+# ~4 m across), so a 1 m quantisation would visibly distort their shadows.
+COORD_ND = 6
+
+
+def convex_hull(pts):
+    """Andrew's monotone chain -- mirrors web/js/geo.js convexHull().
+
+    The client builds every shadow as convexHull(footprint u translated
+    footprint), so storing the hull instead of the raw ring yields byte-for-byte
+    identical shadows (hull is idempotent and commutes with translation) at half
+    the vertices. Concave detail is discarded by the client either way.
+    """
+    pts = sorted(set(map(tuple, pts)))
+    if len(pts) <= 2:
+        return [list(p) for p in pts]
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return [list(p) for p in lower[:-1] + upper[:-1]]
+
+
+def get(ses, url: str, timeout: int, attempts: int = 3):
+    """GET with retries -- the ATOM service is slow and drops connections."""
+    last = None
+    for i in range(attempts):
+        try:
+            r = ses.get(url, timeout=timeout)
+            r.raise_for_status()
+            return r
+        except Exception as exc:  # noqa: BLE001 - network flakiness, any error retries
+            last = exc
+            if i + 1 < attempts:
+                wait = 3 * (i + 1)
+                print(f"    retry {i + 1}/{attempts - 1} after {type(exc).__name__}: "
+                      f"waiting {wait}s", file=sys.stderr)
+                time.sleep(wait)
+    raise last
 
 
 def main() -> int:
@@ -42,18 +97,28 @@ def main() -> int:
     ap.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"),
                     help="clip bbox in lon/lat; strongly recommended")
     ap.add_argument("-o", "--out", default="web/data/catastro_local.json")
+    ap.add_argument("--zip", dest="zip_path",
+                    help="reuse an already-downloaded municipality zip instead of "
+                         "re-fetching it (the download is ~30 MB and slow)")
     args = ap.parse_args()
 
-    import requests
     from pyproj import Transformer
 
     muni = args.municipality
     province = muni[:2]
+
+    if args.zip_path:
+        print(f"1-3/4 using local zip {args.zip_path}")
+        blob = open(args.zip_path, "rb").read()
+        return build(args, muni, blob, Transformer)
+
+    import requests
+
     ses = requests.Session()
     ses.headers["User-Agent"] = "sombra-poc/0.1 (open data fetch)"
 
     print(f"1/4 master ATOM -> province {province}")
-    master = ses.get(MASTER_ATOM, timeout=60).text
+    master = get(ses, MASTER_ATOM, timeout=120).text
     prov_links = [h for h in find_links(master) if f"atom_{province}" in h or f"ES.SDGC.bu.atom_{province}" in h.lower()]
     if not prov_links:
         prov_links = [h for h in find_links(master) if h.endswith(".xml") and f"_{province}" in h]
@@ -62,14 +127,18 @@ def main() -> int:
         return 1
 
     print(f"2/4 province ATOM -> municipality {muni}")
-    prov = ses.get(prov_links[0], timeout=60).text
+    prov = get(ses, prov_links[0], timeout=120).text
     zips = [h for h in find_links(prov) if muni in h and h.lower().endswith(".zip")]
     if not zips:
         print("Municipality zip not found in the province feed.", file=sys.stderr)
         return 1
 
     print(f"3/4 downloading {zips[0]}")
-    blob = ses.get(zips[0], timeout=300).content
+    blob = get(ses, zips[0], timeout=900).content
+    return build(args, muni, blob, Transformer)
+
+
+def build(args, muni: str, blob: bytes, Transformer) -> int:
     zf = zipfile.ZipFile(io.BytesIO(blob))
     gml_name = next((n for n in zf.namelist() if "buildingpart" in n.lower() and n.lower().endswith(".gml")), None)
     if not gml_name:
@@ -84,7 +153,7 @@ def main() -> int:
     tr = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
 
     W, S, E, N = args.bbox if args.bbox else (-180, -90, 180, 90)
-    parts = []
+    hulls = {}  # hull -> max floors; identical footprints are stacked parts
     floors, ring = 0, None
     for _, el in ET.iterparse(io.BytesIO(data), events=("end",)):
         tag = el.tag.rsplit("}", 1)[-1]
@@ -100,9 +169,16 @@ def main() -> int:
             if ring and floors > 0:
                 lonlat = [tr.transform(x, y) for x, y in ring]
                 if any(W <= lon <= E and S <= lat <= N for lon, lat in lonlat):
-                    parts.append([floors, [[round(lon, 6), round(lat, 6)] for lon, lat in lonlat]])
+                    h = convex_hull([[round(lon, COORD_ND), round(lat, COORD_ND)]
+                                     for lon, lat in lonlat])
+                    if len(h) >= 3:
+                        key = tuple(map(tuple, h))
+                        if floors > hulls.get(key, 0):
+                            hulls[key] = floors
             floors, ring = 0, None
             el.clear()
+
+    parts = [[f, [list(p) for p in k]] for k, f in hulls.items()]
 
     out = {
         "source": "Catastro INSPIRE ATOM (transformed)",
