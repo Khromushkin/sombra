@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Sombra — rutas por la sombra</title>
+  <meta name="description" content="Rutas a pie y en bici por la sombra. España. Datos: OSM, Catastro INSPIRE, PNOA-LiDAR." />
+  <meta name="theme-color" content="#1d4ed8" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="vendor/maplibre-gl.css" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="topbar">
+    <div class="brand">🌳 Sombra <span id="tagline" class="tagline"></span></div>
+    <div class="lang">
+      <button id="langEs" class="lang-btn active">ES</button>
+      <button id="langRu" class="lang-btn">RU</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="field">
+      <input id="originInput" autocomplete="off" />
+      <div id="originDrop" class="dropdown"></div>
+    </div>
+    <div class="row between">
+      <button id="locBtn" class="link-btn"></button>
+      <span id="hint" class="hint"></span>
+    </div>
+    <div class="field">
+      <input id="destInput" autocomplete="off" />
+      <div id="destDrop" class="dropdown"></div>
+    </div>
+
+    <div class="row between wrap">
+      <div class="mode-group">
+        <button id="modeWalk" class="mode-btn active"></button>
+        <button id="modeBike" class="mode-btn"></button>
+      </div>
+      <div class="depart-group">
+        <button class="depart-chip active"></button>
+        <button class="depart-chip"></button>
+        <button class="depart-chip"></button>
+        <button class="depart-chip"></button>
+      </div>
+    </div>
+
+    <div class="row slider-row">
+      <span id="lblFaster" class="slider-label"></span>
+      <input id="shadeSlider" type="range" min="0" max="1" step="0.1" value="0.5" />
+      <span id="lblShadier" class="slider-label"></span>
+    </div>
+
+    <div class="row between">
+      <button id="cta" class="cta"></button>
+      <button id="clearBtn" class="link-btn small"></button>
+    </div>
+
+    <div id="error" class="error" style="display:none"></div>
+    <div id="stats" class="stats" style="display:none"></div>
+
+    <div class="sources">
+      <div id="sourcesTitle" class="sources-title"></div>
+      <div id="sourcesList" class="sources-list"></div>
+    </div>
+  </div>
+
+  <script src="vendor/maplibre-gl.js"></script>
+  <script src="vendor/suncalc.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/geo.js"></script>
+  <script src="js/shadows.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/sources.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
