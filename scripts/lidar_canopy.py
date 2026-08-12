@@ -27,8 +27,31 @@ import numpy as np
 
 CELL = 2.0          # grid cell, meters
 MIN_TREE_H = 2.5    # minimum canopy height to count as a tree, meters
+MAX_TREE_H = 35.0   # above this it is a misclassified building, not a tree
+GROUND_BLOCK = 10   # cells (= 20 m) used to estimate ground under gaps
 VEG_CLASSES = (3, 4, 5)
 GROUND_CLASS = 2
+
+
+def fill_ground(gnd, np):
+    """Estimate ground under cells with no ground return.
+
+    Uses the median of a GROUND_BLOCK x GROUND_BLOCK neighbourhood (20 m) rather
+    than a tile-wide median: over a building or a dense crown there is no ground
+    echo, and borrowing the height of the surrounding streets is right, while a
+    tile-wide median silently invents 40-70 m "trees" wherever the terrain or the
+    building stock differs from the tile average.
+    """
+    nx, ny = gnd.shape
+    g = np.where(np.isfinite(gnd), gnd, np.nan)
+    bx, by = -(-nx // GROUND_BLOCK), -(-ny // GROUND_BLOCK)
+    pad = np.full((bx * GROUND_BLOCK, by * GROUND_BLOCK), np.nan)
+    pad[:nx, :ny] = g
+    with np.errstate(all="ignore"):
+        blocks = np.nanmedian(pad.reshape(bx, GROUND_BLOCK, by, GROUND_BLOCK), axis=(1, 3))
+        blocks = np.where(np.isfinite(blocks), blocks, np.nanmedian(pad))
+    up = np.repeat(np.repeat(blocks, GROUND_BLOCK, axis=0), GROUND_BLOCK, axis=1)
+    return np.where(np.isfinite(g), g, up[:nx, :ny])
 
 
 def main() -> int:
@@ -74,11 +97,9 @@ def main() -> int:
 
         veg_g = grid_max(veg)
         gnd_g = grid_max(gnd)
-        # fill ground gaps with local median so canopy height stays sane
-        gnd_fill = np.where(np.isfinite(gnd_g), gnd_g, np.nanmedian(np.where(np.isfinite(gnd_g), gnd_g, np.nan)))
-        canopy = veg_g - gnd_fill
+        canopy = veg_g - fill_ground(gnd_g, np)
 
-        cells = np.argwhere(canopy >= MIN_TREE_H)
+        cells = np.argwhere((canopy >= MIN_TREE_H) & (canopy <= MAX_TREE_H))
         print(f"{path}: {len(cells)} canopy cells")
         if not len(cells):
             continue

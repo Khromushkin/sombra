@@ -1,5 +1,5 @@
 // Sombra service worker: cache-first for the app shell, network for data APIs.
-const CACHE = "sombra-v3";
+const CACHE = "sombra-v4";
 const SHELL = [
   ".", "index.html", "css/app.css", "manifest.webmanifest",
   "vendor/maplibre-gl.js", "vendor/maplibre-gl.css", "vendor/suncalc.js",
@@ -24,8 +24,13 @@ self.addEventListener("fetch", (e) => {
   if (!isShell) return; // data APIs and map tiles always go to the network
   e.respondWith(
     caches.match(e.request).then((hit) => hit || fetch(e.request).then((resp) => {
-      const copy = resp.clone();
-      caches.open(CACHE).then((c) => c.put(e.request, copy));
+      // Never cache failures: a data layer that does not exist yet would otherwise
+      // have its 404 pinned forever, and adding the file later would never reach
+      // returning visitors.
+      if (resp.ok) {
+        const copy = resp.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
+      }
       return resp;
     }))
   );

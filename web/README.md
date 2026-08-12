@@ -30,8 +30,11 @@ python scripts/fetch_catastro.py --municipality 46900 \
 #    "LIDAR - 3a Cobertura (2022-2025)" (2023 flight over Valencia, 5 points/m2,
 #    1x1 km LAZ tiles, ~43 MB each). Filter by name; Valencia tiles are called
 #      PNOA-2023-VAL-<easting_km>-<northing_km>-H30-NPC02.laz     (UTM 30N / EPSG:25830)
-#    The demo route (Plaza del Ayuntamiento -> Ciudad de las Artes) needs 7 tiles:
-#      725-4371  725-4372  726-4370  726-4371  726-4372  727-4370  727-4371
+#    CAREFUL: the northing in the name is the tile's NORTH edge, not its south-west
+#    corner -- PNOA-2023-VAL-724-4372 covers x 724000-725000, y 4371000-4372000. Take
+#    ceil(y/1000) when picking tiles, or you land one kilometre south of the target.
+#    Plaza del Ayuntamiento (725696, 4372210) is in tile 725-4373; Ciudad de las Artes
+#    (727616, 4370733) is in 727-4371.
 #    The download centre is INTERACTIVE only: add to the basket and download from the
 #    browser. There is no scriptable URL -- descargaDir/downloadFile either time out or
 #    return an empty 200. Do not waste time re-deriving this.
