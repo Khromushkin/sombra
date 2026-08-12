@@ -85,17 +85,22 @@ out geom;`;
   // Returns building parts: [{ring: [[lon,lat],...], floors}]
   // Strategy: 1) precomputed local layer (scripts/fetch_catastro.py),
   //           2) live WFS direct, 3) live WFS via public CORS proxies.
-  let localCatastro; // undefined = not tried, null = absent
+  let localCatastro; // undefined = not tried yet, null = layer is absent
   async function loadLocalCatastro() {
     if (localCatastro !== undefined) return localCatastro;
     try {
       const resp = await fetch(C.LOCAL_CATASTRO, { cache: "force-cache" });
       const ct = resp.headers.get("content-type") || "";
+      if (resp.status === 404) { localCatastro = null; return null; }
       if (!resp.ok || (!ct.includes("json") && !ct.includes("octet"))) throw 0;
       const d = await resp.json();
       localCatastro = d && Array.isArray(d.parts) ? d : null;
     } catch (_) {
-      localCatastro = null;
+      // A dropped connection is not the same as "no layer here". Leave the memo
+      // unset so the next request retries; pinning null would keep the source
+      // degraded until reload after a single blip on a 20 MB download.
+      localCatastro = undefined;
+      return undefined;
     }
     return localCatastro;
   }
@@ -155,11 +160,18 @@ out geom;`;
       try {
         const resp = await fetch(C.LOCAL_CANOPY, { cache: "force-cache" });
         const ct = resp.headers.get("content-type") || "";
-        if (!resp.ok || (!ct.includes("json") && !ct.includes("octet"))) throw 0;
-        const d = await resp.json();
-        canopyCache = d && d.features ? d.features : null;
+        if (resp.status === 404) canopyCache = null;                 // layer absent
+        else if (!resp.ok || (!ct.includes("json") && !ct.includes("octet"))) throw 0;
+        else {
+          const d = await resp.json();
+          canopyCache = d && d.features ? d.features : null;
+        }
       } catch (_) {
-        canopyCache = null;
+        // Transient failure: retry on the next request instead of pinning the
+        // source to "next phase" for the rest of the session. The layer is
+        // several MB and races the Overpass call, so a blip here is realistic.
+        report("lidar", "error", "capa no disponible, reintentando");
+        return [];
       }
     }
     if (!canopyCache) {

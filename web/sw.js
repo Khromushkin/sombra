@@ -1,5 +1,5 @@
 // Sombra service worker: cache-first for the app shell, network for data APIs.
-const CACHE = "sombra-v5";
+const CACHE = "sombra-v6";
 const SHELL = [
   ".", "index.html", "css/app.css", "manifest.webmanifest",
   "vendor/maplibre-gl.js", "vendor/maplibre-gl.css", "vendor/suncalc.js",
